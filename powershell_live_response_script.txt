@@ -1,0 +1,114 @@
+<#
+   Live response data collection script can be useful in collecting live data from target machine. 
+it collects a around 15 artifacts from the machine. copy the code snippet and run it in powershell with admin previlages.
+currently its a test script, suggestions are welcomed. when script is executed, it will create a log folder on desktop of target machine. 
+The logs will be useful in analyzing windows machine with malware infections. it creates time lines, capture revelant log information from machine. 
+The script can assist in analysis, along with other data captures. 
+#>
+write-host "***** live response script ********" 
+$CompName = (gi env:\Computername).Value 
+$UserDirectory = (gi env:\userprofile).value 
+$User = (gi env:\USERNAME).value 
+$Date = (Get-Date).ToString('MM.dd.yyyy') 
+$ExecutableFiles = @("*.EXE","*.COM","*.BAT","*.BIN", "*.JOB","*.WS",".WSF","*.PS1",".PAF","*.MSI","*.CGI","*.CMD","*.JAR","*.JSE","* .SCR","*.SCRIPT","*.VB","*.VBE","*.VBS","*.VBSCRIPT","*.DLL")
+$result_output = mkdir $UserDirectory\Desktop\"live_data $User $CompName "
+write-host "directory is created"
+write-host "capturing system info"
+systeminfo /FO CSV | ConvertFrom-Csv | select-object * -ExcludeProperty 'Hotfix(s)','Network Card(s)'>> $result_output\system_info.csv
+write-host "system information captured"
+write-host "capturing user and account information"
+gwmi -ea 0 Win32_UserProfile | select LocalPath, SID,@{NAME='last used';EXPRESSION={$_.ConvertToDateTime($_.lastusetime)}} >>  $result_output\user_account_information.csv
+write-host "user and account information captured"
+write-host "capturing Network information"
+gwmi -ea 0 Win32_NetworkAdapterConfiguration |where{$_.IPEnabled -eq 'True'} | select DHCPEnabled,@{Name='IpAddress';Expression={$_.IpAddress -join ';'}},@{Name='DefaultIPgateway';Expression={$_.DefaultIPgateway -join ';'}},DNSDomain >> $result_output\network_information.csv
+write-host "Network information captured"
+write-host "capturing startup applications"
+gwmi -ea 0 Win32_StartupCommand | select command,user,caption >> $result_output\startup_application1.csv
+gp -ea 0 'hklm:\software\wow6432node\microsoft\windows\currentversion\run'|select * -ExcludeProperty PS* >> $result_output\startup_application2.csv
+gp -ea 0 'hklm:\software\Wow6432Node\Microsoft\Windows\CurrentVersion\Policies\Explorer\Run' | select * -ExcludeProperty PS* >> $result_output\startup_application3.csv
+gp -ea 0 'hklm:\software\wow6432node\microsoft\windows\currentversion\runonce'| select * -ExcludeProperty PS* >> $result_output\startup_application4.csv
+write-host "startup applications captured"
+write-host "capturing list of running processes"
+gwmi -ea 0 win32_process | select processname,@{NAME='CreationDate';EXPRESSION={$_.ConvertToDateTime($_.CreationDate)}},ProcessId,ParentProcessId,CommandLine,sessionID |sort ParentProcessId -desc >> $result_output\list_of_running_processes.csv
+write-host "list of running processes captured"
+write-host "capturing list of running SVC_HOST associated processes captured"
+gwmi -ea 0 win32_process | where {$_.name -eq 'svchost.exe'} | select ProcessId|foreach-object {$P = $_.ProcessID ;gwmi win32_service |where {$_.processId -eq $P} | select processID,name,DisplayName,state,startmode,PathName} >> $result_output\list_of_running_SVC_host_processes.csv
+write-host "list of running SVC_HOST associated processes captured"
+Write-host " capturing list of running services"
+gwmi -ea 0 win32_Service | select Name,ProcessId,State,DisplayName,PathName |sort state >> $result_output\list_of_running_services.csv
+Write-host "list of running services captured"
+Write-host "capturing list of active drivers"
+driverquery.exe /v /FO CSV | ConvertFrom-CSV | Select 'Display Name','StartMode', Path | sort Path >> $result_output\list_of_active_drivers.csv
+Write-host "list of active drivers captured"
+Write-host "capturing list of recently created dlls"
+gci -r -ea 0 c:\ -include *.dll | select Name,CreationTime,LastAccessTime,Directory | sort CreationTime -desc | select -first 100 >> $result_output\recent_dll_created.csv
+Write-host "list of recently created dlls captured"
+Write-host "capturing list of open share locations"
+gwmi -ea 0 Win32_Share | select name,path,description >> $result_output\list_of_share_location.csv 
+Write-host "list of open share locations captured"
+Write-host "capturing list of mapped network drives"
+gp -ea 0 'hkcu:\Software\Microsoft\Windows\CurrentVersion\explorer\Map NetworkDrive MRU' | select * -ExcludeProperty PS* >> $result_output\mapped_network_drives.csv
+Write-host "list of mapped network drives captured"
+Write-host "capturing list of scheduled Jobs running"
+gwmi -ea 0 Win32_ScheduledJob >> $result_output\scheduled_jobs.csv
+Write-host "list of scheduled Jobs running captured"
+Write-host "capturing Scheduled Task events"
+get-winevent -ea 0 -logname Microsoft-Windows-TaskScheduler/Operational | select TimeCreated,ID,Message >> $result_output\schedule_task_events.csv
+Write-host "Scheduled Task events captured"
+Write-host "capturing HotFix installs"
+Get-HotFix -ea 0| Select HotfixID, Description, InstalledBy, InstalledOn | Sort-Object InstalledOn -Descending >> $result_output\hotfix_info.csv
+Write-host "HotFix installs captured"
+Write-host "capturing list of installed applications"
+gp -ea 0 HKLM:\SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\* | Select DisplayName,DisplayVersion,Publisher,InstallDate,InstallLocation | Sort InstallDate -Desc >> $result_output\list_of_installed_application.csv
+Write-Host "list of installed applications captured"
+Write-host "capturing link files"
+gwmi -ea 0 Win32_ShortcutFile | select FileName,caption,@{NAME='CreationDate';EXPRESSION={$_.ConvertToDateTime($_.CreationDate)}},@{NAME=’LastAccessed’;EXPRESSION={$_.ConvertToDateTime($_.LastAccessed)}},@{NAME=’LastModified’;EXPRESSION={$_.ConvertToDateTime($_.LastModified)}},Target | Where-Object {$_.lastModified -gt ((Get-Date).addDays(-5)) }| sort LastModified -Descending >> $result_output\Link_files.csv
+Write-Host "list of link files captured"
+Write-Host "capturing list of compressed files"
+gci -Path C:\ -r -ea 0 -include $ExecutableFiles |Where {$_.Attributes -band [IO.FileAttributes]::Compressed} >> $result_output\compressed_files.csv
+Write-Host "list of compressed files captured"
+Write-Host "capturing prefetch files"
+gci -path C:\windows\prefetch\*.pf -ea 0 | select Name,LastAccessTime,CreationTime | sort LastAccessTime > $result_output\prefetch_files.csv
+Write-Host " prefetch files captured"
+Write-Host "capturing dns cache"
+ipconfig /displaydns | select-string 'Record Name' >> $result_output\dns_cache.csv
+Write-Host "dns cache captured"
+Write-Host "capturing failed DNS resolution_Events"
+Get-WinEvent -max 50 -ea 0 -FilterHashtable @{Logname='system';ID=1014} |select TimeCreated,ID,Message  >>$result_output\failed_DNS_resolution_events.csv
+Write-Host "capturing List of available Event Logs"
+Get-WinEvent -ea 0 -ListLog * | Where-Object {$_.IsEnabled} | Sort-Object -Property LastWriteTime -Descending | select LogName, FileSize, LastWriteTime >> List_of_available_event_logs.csv
+Write-Host " List of available Event Logs captured"
+Write-Host " List of Typed internet explorer URLs"
+gp -ea 0 'hkcu:\Software\Microsoft\Internet Explorer\TypedUrls' | select * -ExcludeProperty PS* >> $result_output\typed_Urls.csv
+Write-Host " List of Typed internet explorer URL's captured"
+Write-Host "Capturing  List of Connected USB devices"
+gp -ea 0 hklm:\system\currentcontrolset\enum\usbstor\*\* | select FriendlyName,PSChildName,ContainerID >> $result_output\USB_Devices_Connected.csv
+Write-Host " List of connected USB devices captured"
+Write-Host " capturing timeline for executables"
+gci -Path C:\ -r -force -ea 0 -include $ExecutableFiles | Where-Object {-not $_.PSIsContainer -and $_.lastwritetime -gt ((Get-Date).addDays(-30)) } | select fullname,lastwritetime,@{N='Owner';E={($_ | Get-ACL).Owner}} | sort lastwritetime -desc | ConvertTo-html -Body "<H2> File Timeline ExecutableFiles - Past 30 days </H2>" >> $result_output\timeline_executable.html
+Write-Host " timeline for executable captured"
+Write-Host "capturing list of executables downloaded"
+gci c:\ -r -ea 0 -include $ExecutableFiles |foreach {$P = $_.fullname; get-item $P -Stream *} |where {$_.Stream -match "Zone.Identifier"} | select filename,stream, @{N='LastWriteTime';E={(dir $P).LastWriteTime}} | ConvertTo-html -Body"<H2> Downloaded executable files </H2>" >> $result_output\List_downloaded_executables.html
+Write-Host "list of executable downloaded captured"
+write-Host " capturing netstat information attached to dlls used"
+$cmd = netstat -nao | select-string "ESTA"
+foreach ($element in $cmd)
+{ 
+    $data = $element -split ' ' | where {$_ -ne ''} 
+    New-Object -TypeName psobject -Property @{
+
+    'Local IP : Port#'=$data[1];
+    'Remote IP : Port#'=$data[2];
+    'Process ID'= $data[4];
+    'Process Name'=((Get-process |where {$_.ID -eq $data[4]})).Name
+    'Process File Path'=((Get-process |where {$_.ID -eq $data[4]})).path
+    'Process Start Time'=((Get-process |where {$_.ID -eq $data[4]})).starttime
+    'Associated DLLs and File Path'=((Get-process |where {$_.ID -eq $data[4]})).Modules |select @{Name='Module';Expression={$_.filename -join '; '} } |out-string}|ConvertTo-html -Property 'Local IP : Port#', 'Remote IP : Port#','Process ID','Process Name','Process Start Time','Process File Path','Associated DLLs and File Path' -Body "<H2> </H2>" >> $result_output\netstat_info_dll_associated.html
+}
+write-host " capturing file listing of machine"
+Get-ChildItem c:\ -recurse -force -ErrorAction SilentlyContinue| Select @{Name='CreationTimeUtc';Expression={$_.CreationTimeUtc.ToString('dd-MM-yyyy HH:mm:ss')}},@{Name='LastWriteTimeUtc';Expression={$_.LastWriteTimeUtc.ToString('dd-MM-yyyy HH:mm:ss')}},Extension,Fullname,Name| Export-Csv -Path $result_output\disk_file_listing.csv
+write-host " file listing capture completed"
+Write-host " capturing windows event_logs of machine
+Copy-Item "C:\Windows\System32\winevt\Logs\" -Destination $result_output\eventlogs\ -Recurse 
+Write-host " windows event_logs Captured"
+(New-Object -ComObject wscript.shell).popup("Script Completed")
