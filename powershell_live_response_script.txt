@@ -62,9 +62,10 @@ Write-host "capturing list of installed applications"
 gp -ea 0 HKLM:\SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\* | Select DisplayName,DisplayVersion,Publisher,InstallDate,InstallLocation | Sort InstallDate -Desc >> $result_output\list_of_installed_application.csv
 Write-Host "list of installed applications captured"
 Write-host "capturing link files"
-gwmi -ea 0 Win32_ShortcutFile | select FileName,caption,@{NAME='CreationDate';EXPRESSION={$_.ConvertToDateTime($_.CreationDate)}},@{NAME=’LastAccessed’;EXPRESSION={$_.ConvertToDateTime($_.LastAccessed)}},@{NAME=’LastModified’;EXPRESSION={$_.ConvertToDateTime($_.LastModified)}},Target | Where-Object {$_.lastModified -gt ((Get-Date).addDays(-5)) }| sort LastModified -Descending >> $result_output\Link_files.csv
+gwmi -ea 0 Win32_ShortcutFile | select FileName,caption,@{NAME='CreationDate';EXPRESSION={$_.ConvertToDateTime($_.CreationDate)}},@{NAME=â€™LastAccessedâ€™;EXPRESSION={$_.ConvertToDateTime($_.LastAccessed)}},@{NAME=â€™LastModifiedâ€™;EXPRESSION={$_.ConvertToDateTime($_.LastModified)}},Target | Where-Object {$_.lastModified -gt ((Get-Date).addDays(-5)) }| sort LastModified -Descending >> $result_output\Link_files.csv
 Write-Host "list of link files captured"
 Write-Host "capturing list of compressed files"
+<#tanuj prajapati#>
 gci -Path C:\ -r -ea 0 -include $ExecutableFiles |Where {$_.Attributes -band [IO.FileAttributes]::Compressed} >> $result_output\compressed_files.csv
 Write-Host "list of compressed files captured"
 Write-Host "capturing prefetch files"
